@@ -3,21 +3,25 @@
 
 // * Baud rate for both hardware and software serial
 #define BAUD_RATE 115200
+#define SWSERIAL_BAUD_RATE 9600
 
 // * Max telegram length
-#define P1_MAXLINELENGTH 64
+#define P1_MAXLINELENGTH 75
 
 // * P1 Meter RX pin
 #define P1_SERIAL_RX D2
 
 // * Initiate Software Serial
-SoftwareSerial p1_serial(P1_SERIAL_RX, -1, true, P1_MAXLINELENGTH); // (RX, TX. inverted, buffer)
+//SoftwareSerial p1_serial(SERIAL_7E1, P1_SERIAL_RX, SW_SERIAL_UNUSED_PIN, true, P1_MAXLINELENGTH); // (RX, TX, not inverted, buffer)
+SoftwareSerial p1_serial(P1_SERIAL_RX, SW_SERIAL_UNUSED_PIN, true, P1_MAXLINELENGTH); // (RX, TX, inverted, buffer)
 
-class DsmrP1CustomSensor : public PollingComponent {
+class DsmrP1CustomSensor : public Component {
  public:
    // * Set to store received telegram
   char telegram[P1_MAXLINELENGTH];
-  
+  //char input;
+  //char buffer[P1_MAXLINELENGTH]; //Buffer voor seriele data om \n te vinden.
+  //int bufpos = 0;
   // * Set to store the data values read
   long CONSUMPTION_LOW_TARIF;
   long CONSUMPTION_HIGH_TARIF;
@@ -25,7 +29,7 @@ class DsmrP1CustomSensor : public PollingComponent {
   long INSTANT_POWER_CURRENT;
   long INSTANT_POWER_USAGE;
   long GAS_METER_M3;
-  
+
   // Set to store data counters read
   long ACTUAL_TARIF;
   long SHORT_POWER_OUTAGES;
@@ -48,41 +52,49 @@ class DsmrP1CustomSensor : public PollingComponent {
   Sensor *short_power_drops_sensor = new Sensor();
   Sensor *short_power_peaks_sensor = new Sensor();
 
-  DsmrP1CustomSensor() : PollingComponent(15000) { }
+  // DsmrP1CustomSensor() : PollingComponent(1000) { }
+  DsmrP1CustomSensor() {}
 
   void setup() override {
 	Serial.begin(BAUD_RATE);
 	
     // * Start software serial for p1 meter
-    p1_serial.begin(BAUD_RATE);
+    p1_serial.begin(SWSERIAL_BAUD_RATE);
 	
-	ESP_LOGD("DmsrCustom","Init baud rate %f", BAUD_RATE);
+	  //ESP_LOGD("DmsrCustom","Init baud rate %d", SWSERIAL_BAUD_RATE);
   }
 
-  void update() override {
+  void loop() override {
 	
-	ESP_LOGD("DmsrCustom","Updating..");	
+	//ESP_LOGD("DmsrCustom","Updating..");	
 	
     if (p1_serial.available())
     {
-	  ESP_LOGD("DmsrCustom","Data ready..");	
-	  
+	  // ESP_LOGD("DmsrCustom","Data ready..");	
       memset(telegram, 0, sizeof(telegram));
 
       while (p1_serial.available())
       {
+        //input = p1_serial.read();
+        //input &= ~(1 << 7);
+        //char inChar = (char)input;
+        //buffer[bufpos] = input&127;
+        //bufpos++;
+        //if (input == '!') { // we hebben een lijn binnen (gegevens tot \n)
+        //  ESP_LOGD("DmsrCustom","Telegram reads: %c", *buffer);
+        //}
         ESP.wdtDisable();
         int len = p1_serial.readBytesUntil('\n', telegram, P1_MAXLINELENGTH);
+
         ESP.wdtEnable(1);
 
         telegram[len] = '\n';
         telegram[len + 1] = 0;
         yield();    
-
         bool result = decode_telegram(len + 1);
         if (result)
         {  
-		  ESP_LOGD("DmsrCustom","CRC Ok");	
+		      ESP_LOGD("DmsrCustom","CRC Ok");	
 		  
           consumption_low_tarif_sensor->publish_state(CONSUMPTION_LOW_TARIF);
           consumption_high_tarif_sensor->publish_state(CONSUMPTION_HIGH_TARIF);
@@ -101,7 +113,7 @@ class DsmrP1CustomSensor : public PollingComponent {
 		}
       }
 	} else {
-		ESP_LOGD("DmsrCustom","No data ready..");
+		// ESP_LOGD("DmsrCustom","No data ready..");
 	}  
   }
   
