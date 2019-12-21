@@ -12,16 +12,13 @@
 #define P1_SERIAL_RX D2
 
 // * Initiate Software Serial
-//SoftwareSerial p1_serial(SERIAL_7E1, P1_SERIAL_RX, SW_SERIAL_UNUSED_PIN, true, P1_MAXLINELENGTH); // (RX, TX, not inverted, buffer)
 SoftwareSerial p1_serial(P1_SERIAL_RX, SW_SERIAL_UNUSED_PIN, true, P1_MAXLINELENGTH); // (RX, TX, inverted, buffer)
 
 class DsmrP1CustomSensor : public Component {
  public:
    // * Set to store received telegram
   char telegram[P1_MAXLINELENGTH];
-  //char input;
-  //char buffer[P1_MAXLINELENGTH]; //Buffer voor seriele data om \n te vinden.
-  //int bufpos = 0;
+
   // * Set to store the data values read
   long CONSUMPTION_LOW_TARIF;
   long CONSUMPTION_HIGH_TARIF;
@@ -39,10 +36,7 @@ class DsmrP1CustomSensor : public Component {
   long LONG_POWER_OUTAGES;
   long SHORT_POWER_DROPS;
   long SHORT_POWER_PEAKS;
-  
-  // * Set during CRC checking
-  unsigned int currentCRC = 0; 
-  
+ 
   Sensor *consumption_low_tarif_sensor = new Sensor();
   Sensor *consumption_high_tarif_sensor = new Sensor();
   Sensor *return_low_tarif_sensor = new Sensor();
@@ -62,12 +56,10 @@ class DsmrP1CustomSensor : public Component {
   DsmrP1CustomSensor() {}
 
   void setup() override {
-	Serial.begin(BAUD_RATE);
+	  Serial.begin(BAUD_RATE);
 	
     // * Start software serial for p1 meter
     p1_serial.begin(SWSERIAL_BAUD_RATE);
-	
-	  //ESP_LOGD("DmsrCustom","Init baud rate %d", SWSERIAL_BAUD_RATE);
   }
 
   void loop() override {
@@ -82,6 +74,7 @@ class DsmrP1CustomSensor : public Component {
 
         int len = p1_serial.readBytesUntil('\n', telegram, P1_MAXLINELENGTH);
         
+        // DSMR 2.2 is SERIAL 7E1 not 8N1, so a bitshift needs to take place in order to properly read data.
         for (int cnt = 0; cnt < len; cnt++)
           telegram[cnt] &= ~(1 << 7);	
         
@@ -89,8 +82,6 @@ class DsmrP1CustomSensor : public Component {
 
         telegram[len] = '\n';
         telegram[len + 1] = 0;
-        yield();    
-        //bool result = decode_telegram(len + 1);
         decode_telegram(len +1);
       }
 	  }  
@@ -147,8 +138,7 @@ class DsmrP1CustomSensor : public Component {
 
 /*
   Sample DSMR2.2 message
-  
-  /XMX5<secret>
+  /XMX5<secret>  <-- Landis + Gyr E350 ZCF120
 
   0-0:96.1.1(123454323454323456543)
   1-0:1.8.1(12451.666*kWh)
@@ -161,7 +151,6 @@ class DsmrP1CustomSensor : public Component {
   0-0:96.13.1()
   0-0:96.13.0()
   !
-
 */
     // 1-0:1.8.1(000992.992*kWh)
     // 1-0:1.8.1 = Elektra verbruik laag tarief (DSMR v4.0)
@@ -196,7 +185,6 @@ class DsmrP1CustomSensor : public Component {
     }
 
     // 1-0:1.7.0(00.424*kW) Actueel verbruik
-    // 1-0:2.7.0(00.000*kW) Actuele teruglevering
     // 1-0:1.7.x = Electricity consumption actual usage (DSMR v4.0)
     if (strncmp(telegram, "1-0:1.7.0", strlen("1-0:1.7.0")) == 0)
     {
@@ -204,6 +192,8 @@ class DsmrP1CustomSensor : public Component {
       actual_consumption_sensor->publish_state(ACTUAL_CONSUMPTION);
     }
 
+    // 1-0:2.7.0(0000.00*kW)
+    // 1-0:2.7.0(0000.00*kW) Actuele teruglevering
     if (strncmp(telegram, "1-0:2.7.0", strlen("1-0:2.7.0")) == 0)
     {
       ACTUAL_RETURN = getValue(telegram, len, '(', '*');
@@ -241,7 +231,7 @@ class DsmrP1CustomSensor : public Component {
       ACTUAL_TARIF = getValue(telegram, len, '(', ')');
       actual_tarif_sensor->publish_state(ACTUAL_TARIF);
     }
-/*  
+  
     // 0-0:96.7.21(00003)
     // 0-0:96.7.21 = Aantal onderbrekingen Elektriciteit
     if (strncmp(telegram, "0-0:96.7.21", strlen("0-0:96.7.21")) == 0)
@@ -268,9 +258,7 @@ class DsmrP1CustomSensor : public Component {
     if (strncmp(telegram, "1-0:32.36.0", strlen("1-0:32.36.0")) == 0)
     {
       SHORT_POWER_PEAKS = getValue(telegram, len, '(', ')');
-    }*/
-  
-//    return validCRCFound;
+    }
   } 
   
 };
