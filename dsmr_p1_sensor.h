@@ -25,7 +25,10 @@ class DsmrP1CustomSensor : public Component {
   // * Set to store the data values read
   long CONSUMPTION_LOW_TARIF;
   long CONSUMPTION_HIGH_TARIF;
+  long RETURN_LOW_TARIF;
+  long RETURN_HIGH_TARIF;
   long ACTUAL_CONSUMPTION;
+  long ACTUAL_RETURN;
   long INSTANT_POWER_CURRENT;
   long INSTANT_POWER_USAGE;
   long GAS_METER_M3;
@@ -42,7 +45,10 @@ class DsmrP1CustomSensor : public Component {
   
   Sensor *consumption_low_tarif_sensor = new Sensor();
   Sensor *consumption_high_tarif_sensor = new Sensor();
+  Sensor *return_low_tarif_sensor = new Sensor();
+  Sensor *return_high_tarif_sensor = new Sensor();
   Sensor *actual_consumption_sensor = new Sensor();
+  Sensor *actual_return_sensor = new Sensor();
   Sensor *instant_power_current_sensor = new Sensor();
   Sensor *instant_power_usage_sensor = new Sensor();
   Sensor *gas_meter_m3_sensor = new Sensor();
@@ -65,83 +71,32 @@ class DsmrP1CustomSensor : public Component {
   }
 
   void loop() override {
-	
-	//ESP_LOGD("DmsrCustom","Updating..");	
-	
+		
     if (p1_serial.available())
     {
-	  // ESP_LOGD("DmsrCustom","Data ready..");	
       memset(telegram, 0, sizeof(telegram));
 
       while (p1_serial.available())
       {
-        //input = p1_serial.read();
-        //input &= ~(1 << 7);
-        //char inChar = (char)input;
-        //buffer[bufpos] = input&127;
-        //bufpos++;
-        //if (input == '!') { // we hebben een lijn binnen (gegevens tot \n)
-        //  ESP_LOGD("DmsrCustom","Telegram reads: %c", *buffer);
-        //}
         ESP.wdtDisable();
-        int len = p1_serial.readBytesUntil('\n', telegram, P1_MAXLINELENGTH);
 
+        int len = p1_serial.readBytesUntil('\n', telegram, P1_MAXLINELENGTH);
+        
+        for (int cnt = 0; cnt < len; cnt++)
+          telegram[cnt] &= ~(1 << 7);	
+        
         ESP.wdtEnable(1);
 
         telegram[len] = '\n';
         telegram[len + 1] = 0;
         yield();    
-        bool result = decode_telegram(len + 1);
-        if (result)
-        {  
-		      ESP_LOGD("DmsrCustom","CRC Ok");	
-		  
-          consumption_low_tarif_sensor->publish_state(CONSUMPTION_LOW_TARIF);
-          consumption_high_tarif_sensor->publish_state(CONSUMPTION_HIGH_TARIF);
-          actual_consumption_sensor->publish_state(ACTUAL_CONSUMPTION);
-          instant_power_current_sensor->publish_state(INSTANT_POWER_CURRENT);
-          instant_power_usage_sensor->publish_state(INSTANT_POWER_USAGE);
-          gas_meter_m3_sensor->publish_state(GAS_METER_M3);
-		  
-          actual_tarif_sensor->publish_state(ACTUAL_TARIF);
-          short_power_outages_sensor->publish_state(SHORT_POWER_OUTAGES);
-          long_power_outages_sensor->publish_state(LONG_POWER_OUTAGES);
-          short_power_drops_sensor->publish_state(SHORT_POWER_DROPS);
-          short_power_peaks_sensor->publish_state(SHORT_POWER_PEAKS);
-        } else {
-			ESP_LOGD("DmsrCustom","CRC Not Ok");	
-		}
+        //bool result = decode_telegram(len + 1);
+        decode_telegram(len +1);
       }
-	} else {
-		// ESP_LOGD("DmsrCustom","No data ready..");
-	}  
+	  }  
   }
   
  private:
-  unsigned int CRC16(unsigned int crc, unsigned char *buf, int len)
-  {
-  	for (int pos = 0; pos < len; pos++)
-    {
-  		crc ^= (unsigned int)buf[pos];  // * XOR byte into least sig. byte of crc
-                        // * Loop over each bit
-      for (int i = 8; i != 0; i--)
-      {
-        // * If the LSB is set
-        if ((crc & 0x0001) != 0)
-        {
-          // * Shift right and XOR 0xA001
-          crc >>= 1;
-  				crc ^= 0xA001;
-  			}
-        // * Else LSB is not set
-        else
-          // * Just shift right
-          crc >>= 1;
-  		}
-  	}
-  	return crc;
-  }
-  
   bool isNumber(char *res, int len)
   {
     for (int i = 0; i < len; i++)
@@ -187,48 +142,33 @@ class DsmrP1CustomSensor : public Component {
     return 0;
   }
   
-  bool decode_telegram(int len)
+  void decode_telegram(int len)
   {
-    int startChar = FindCharInArrayRev(telegram, '/', len);
-    int endChar = FindCharInArrayRev(telegram, '!', len);
-    bool validCRCFound = false;
+
+/*
+  Sample DSMR2.2 message
   
-    for (int cnt = 0; cnt < len; cnt++)
-      Serial.print(telegram[cnt]);
-  
-    if (startChar >= 0)
-    {
-      // * Start found. Reset CRC calculation
-      currentCRC = CRC16(0x0000,(unsigned char *) telegram+startChar, len-startChar);
-    }
-    else if (endChar >= 0)
-    {
-      // * Add to crc calc
-      currentCRC = CRC16(currentCRC,(unsigned char*)telegram+endChar, 1);
-  
-      char messageCRC[5];
-      strncpy(messageCRC, telegram + endChar + 1, 4);
-  
-      messageCRC[4] = 0;   // * Thanks to HarmOtten (issue 5)
-      validCRCFound = (strtol(messageCRC, NULL, 16) == currentCRC);
-  
-      if (validCRCFound)
-        Serial.println(F("CRC Valid!"));
-      else
-        Serial.println(F("CRC Invalid!"));
-  
-      currentCRC = 0;
-    }
-    else
-    {
-      currentCRC = CRC16(currentCRC, (unsigned char*) telegram, len);
-    }
-  
+  /XMX5<secret>
+
+  0-0:96.1.1(123454323454323456543)
+  1-0:1.8.1(12451.666*kWh)
+  1-0:1.8.2(09539.696*kWh)
+  1-0:2.8.1(03008.444*kWh)
+  1-0:2.8.2(07401.746*kWh)
+  0-0:96.14.0(0002)
+  1-0:1.7.0(0000.61*kW)
+  1-0:2.7.0(0000.00*kW)
+  0-0:96.13.1()
+  0-0:96.13.0()
+  !
+
+*/
     // 1-0:1.8.1(000992.992*kWh)
     // 1-0:1.8.1 = Elektra verbruik laag tarief (DSMR v4.0)
     if (strncmp(telegram, "1-0:1.8.1", strlen("1-0:1.8.1")) == 0)
     {
       CONSUMPTION_LOW_TARIF = getValue(telegram, len, '(', '*');
+      consumption_low_tarif_sensor->publish_state(CONSUMPTION_LOW_TARIF);
     }
   
     // 1-0:1.8.2(000560.157*kWh)
@@ -236,14 +176,38 @@ class DsmrP1CustomSensor : public Component {
     if (strncmp(telegram, "1-0:1.8.2", strlen("1-0:1.8.2")) == 0)
     {
       CONSUMPTION_HIGH_TARIF = getValue(telegram, len, '(', '*');
+      consumption_high_tarif_sensor->publish_state(CONSUMPTION_HIGH_TARIF);
+    }
+
+    // 1-0:2.8.1(000992.992*kWh)
+    // 1-0:2.8.1 = Elektra teruglevering laag tarief (DSMR v4.0)
+    if (strncmp(telegram, "1-0:2.8.1", strlen("1-0:2.8.1")) == 0)
+    {
+      RETURN_LOW_TARIF = getValue(telegram, len, '(', '*');
+      return_low_tarif_sensor->publish_state(RETURN_LOW_TARIF);
     }
   
+    // 1-0:1.8.2(000560.157*kWh)
+    // 1-0:1.8.2 = Elektra teruglevering hoog tarief (DSMR v4.0)
+    if (strncmp(telegram, "1-0:2.8.2", strlen("1-0:2.8.2")) == 0)
+    {
+      RETURN_HIGH_TARIF = getValue(telegram, len, '(', '*');
+      return_high_tarif_sensor->publish_state(RETURN_HIGH_TARIF);
+    }
+
     // 1-0:1.7.0(00.424*kW) Actueel verbruik
     // 1-0:2.7.0(00.000*kW) Actuele teruglevering
     // 1-0:1.7.x = Electricity consumption actual usage (DSMR v4.0)
     if (strncmp(telegram, "1-0:1.7.0", strlen("1-0:1.7.0")) == 0)
     {
       ACTUAL_CONSUMPTION = getValue(telegram, len, '(', '*');
+      actual_consumption_sensor->publish_state(ACTUAL_CONSUMPTION);
+    }
+
+    if (strncmp(telegram, "1-0:2.7.0", strlen("1-0:2.7.0")) == 0)
+    {
+      ACTUAL_RETURN = getValue(telegram, len, '(', '*');
+      actual_return_sensor->publish_state(ACTUAL_RETURN);
     }
   
     // 1-0:21.7.0(00.378*kW)
@@ -251,6 +215,7 @@ class DsmrP1CustomSensor : public Component {
     if (strncmp(telegram, "1-0:21.7.0", strlen("1-0:21.7.0")) == 0)
     {
       INSTANT_POWER_USAGE = getValue(telegram, len, '(', '*');
+      instant_power_current_sensor->publish_state(INSTANT_POWER_CURRENT);
     }
   
     // 1-0:31.7.0(002*A)
@@ -258,6 +223,7 @@ class DsmrP1CustomSensor : public Component {
     if (strncmp(telegram, "1-0:31.7.0", strlen("1-0:31.7.0")) == 0)
     {
       INSTANT_POWER_CURRENT = getValue(telegram, len, '(', '*');
+      instant_power_usage_sensor->publish_state(INSTANT_POWER_USAGE);
     }
   
     // 0-1:24.2.1(150531200000S)(00811.923*m3)
@@ -265,6 +231,7 @@ class DsmrP1CustomSensor : public Component {
     if (strncmp(telegram, "0-1:24.2.1", strlen("0-1:24.2.1")) == 0)
     {
       GAS_METER_M3 = getValue(telegram, len, '(', '*');
+      gas_meter_m3_sensor->publish_state(GAS_METER_M3);
     }
   
     // 0-0:96.14.0(0001)
@@ -272,8 +239,9 @@ class DsmrP1CustomSensor : public Component {
     if (strncmp(telegram, "0-0:96.14.0", strlen("0-0:96.14.0")) == 0)
     {
       ACTUAL_TARIF = getValue(telegram, len, '(', ')');
+      actual_tarif_sensor->publish_state(ACTUAL_TARIF);
     }
-  
+/*  
     // 0-0:96.7.21(00003)
     // 0-0:96.7.21 = Aantal onderbrekingen Elektriciteit
     if (strncmp(telegram, "0-0:96.7.21", strlen("0-0:96.7.21")) == 0)
@@ -300,9 +268,9 @@ class DsmrP1CustomSensor : public Component {
     if (strncmp(telegram, "1-0:32.36.0", strlen("1-0:32.36.0")) == 0)
     {
       SHORT_POWER_PEAKS = getValue(telegram, len, '(', ')');
-    }
+    }*/
   
-    return validCRCFound;
+//    return validCRCFound;
   } 
   
 };
